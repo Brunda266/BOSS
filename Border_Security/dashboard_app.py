@@ -8,31 +8,31 @@ import pandas as pd
 import io 
 
 # --- CONFIGURATION ---
-ALERT_STATUS_FILE = 'alert_status.txt'
-FRAME_OUTPUT_FILE_LIVE = 'current_frame.jpg'
-RF_STATUS_FILE = 'rf_status.txt'
+ALERT_STATUS_FILE = 'alert_status.txt'      # Human Detection Status
+FRAME_OUTPUT_FILE_LIVE = 'current_frame.jpg' # The single image for the live feed
+RF_STATUS_FILE = 'rf_status.txt'            # RF Threat Status 
 DB_NAME = 'surveillance_log.db'
 ALERT_IMAGE_DIR = 'alert_images'
-BACKGROUND_IMAGE_PATH = 'border.jpg' # <-- CHANGE THIS PATH/FILENAME
+ANIMAL_IMAGE_DIR = 'animal_images'          # New folder path for animal captures
+BACKGROUND_IMAGE_PATH = 'border.jpg'   # <-- SET YOUR IMAGE NAME HERE
 # --- END CONFIGURATION ---
 
-# --- Custom CSS Function (NEW) ---
-# dashboard_app.py (Replace the function definition)
-
-# --- Custom CSS Function (UPDATED FOR ROBUSTNESS) ---
+# --- Custom CSS Function (Handles background and dark theme) ---
 def add_bg_from_local(image_file):
     import base64
     if not os.path.exists(image_file):
-        st.error(f"Background image file not found at: {image_file}")
+        # Allow the app to run even if the background image is missing
+        print(f"Background image file not found at: {image_file}")
         return
 
     with open(image_file, "rb") as f:
         data = base64.b64encode(f.read()).decode("utf-8")
     
-    # Inject CSS to set the background image
+    # Inject CSS to set the background image and define text area styling
     st.markdown(
         f"""
         <style>
+        /* 1. Set the MAIN background image and fixed properties */
         .stApp {{
             background-image: url("data:image/jpeg;base64,{data}");
             background-size: cover;
@@ -40,31 +40,23 @@ def add_bg_from_local(image_file):
             background-repeat: no-repeat;
             background-attachment: fixed;
         }}
-  /* 2. Target the main content blocks (headers, markdown, titles) 
-              to give them a semi-transparent black background and white text. */
+        
+        /* 2. Target the main content blocks to give them a semi-transparent black background and white text. */
         .stApp, .css-1d3f9g6, .main, .block-container {{
             color: white; /* Ensures text is white */
-            /* Add a semi-transparent black background to content areas */
-            background-color: rgba(0, 0, 0, 0.7) !important; 
+            background-color: rgba(0, 0, 0, 0.7) !important; /* Semi-transparent black overlay */
         }}
         
-        /* 3. Ensure the markdown headers and text are white (if necessary) */
-        h1, h2, h3, h4, .stText {{
+        /* 3. Ensure the markdown headers and text are white */
+        h1, h2, h3, h4, .stText, .stMarkdown {{
             color: white !important;
         }}
-        
-        /* Remove extra Streamlit styling boxes if needed */
-        .stTabs [data-baseweb="tab-list"] {{
-            background-color: rgba(0, 0, 0, 0.8) !important;
-        }}
-        
         </style>
         """,
         unsafe_allow_html=True
     )
-# --- End Custom CSS Function ---
 
-# --- Status Check Helper Functions (Kept the same) ---
+# --- Status Check Helper Functions ---
 def check_alert_status():
     try:
         with open(ALERT_STATUS_FILE, 'r') as f:
@@ -79,9 +71,16 @@ def check_rf_status():
     except FileNotFoundError: return "RF_INIT"
     except Exception: return "RF_ERROR"
         
-def get_most_recent_alert_image():
+def get_most_recent_alert_image(threat_type="Human"):
+    """Fetches the image path for the latest captured threat log of a specific type."""
     conn = sqlite3.connect(DB_NAME)
-    query = "SELECT image_path, timestamp, type FROM threat_log ORDER BY id DESC LIMIT 1"
+    query = f"""
+        SELECT image_path, timestamp, type 
+        FROM threat_log 
+        WHERE type = '{threat_type}' 
+        ORDER BY id DESC 
+        LIMIT 1
+    """
     try:
         df = pd.read_sql_query(query, conn)
         conn.close()
@@ -95,8 +94,7 @@ def get_most_recent_alert_image():
 
 def display_dashboard():
     # --- 1. Apply Background Image ---
-    # Call the function directly here
-    add_bg_from_local(BACKGROUND_IMAGE_PATH)
+    add_bg_from_local(BACKGROUND_IMAGE_PATH) 
 
     # --- UI Setup (Run only once) ---
     st.set_page_config(
@@ -114,7 +112,7 @@ def display_dashboard():
     # Define tabs
     tab1, tab2 = st.tabs([" THREAT MONITORING", " VISUAL MONITORING"])
     
-    # Define persistent placeholders outside the loop
+    # Define persistent placeholders for Tab 1
     with tab1:
         st.subheader("Current Surveillance Status Metrics")
         col_h, col_r = st.columns(2)
@@ -125,14 +123,19 @@ def display_dashboard():
             st.markdown("###  Device Inference Status")
             rf_status_placeholder = st.empty()
             
+    # Define persistent placeholders for Tab 2 (Three Columns)
     with tab2:
-        live_col, log_col = st.columns(2)
+        live_col, human_log_col, animal_log_col = st.columns(3)
+        
         with live_col:
             st.markdown("###  Live Surveillance Stream")
             live_placeholder = st.empty()
-        with log_col:
-            st.markdown("###  Most Recent Alert Image")
-            log_placeholder = st.empty()
+        with human_log_col:
+            st.markdown("### Human Alert Image")
+            human_log_placeholder = st.empty()
+        with animal_log_col:
+            st.markdown("###  Animal Alert Image")
+            animal_log_placeholder = st.empty()
 
     # Start the main update loop
     while True:
@@ -157,11 +160,11 @@ def display_dashboard():
             # Column H: Human Detection Status
             with col_h:
                 if human_status == "ALERT":
-                    html = ('<div style="background-color: #ff4b4b; padding: 15px; border-radius: 8px; color: black; text-align: center;">'
+                    html = ('<div style="background-color: #ff4b4b; padding: 15px; border-radius: 8px; color: white; text-align: center;">'
                             '<h1>THREAT DETECTED</h1>'
                             '</div>')
                 elif human_status == "NORMAL":
-                    html = ('<div style="background-color: #008000; padding: 15px; border-radius: 8px; color: black; text-align: center;">'
+                    html = ('<div style="background-color: #008000; padding: 15px; border-radius: 8px; color: white; text-align: center;">'
                             '<h1>SAFE CONDITION</h1>'
                             '</div>')
                 else:
@@ -173,11 +176,11 @@ def display_dashboard():
             # Column R: RF Inference Status
             with col_r:
                 if rf_status == "RF_THREAT":
-                    html = ('<div style="background-color: #ff4b4b; padding: 15px; border-radius: 8px; color: black; text-align: center;">'
+                    html = ('<div style="background-color: #ff4b4b; padding: 15px; border-radius: 8px; color: white; text-align: center;">'
                             '<h1>THREAT DETECTED</h1>'
                             '</div>')
                 elif rf_status == "RF_CLEAR":
-                    html = ('<div style="background-color: #008000; padding: 15px; border-radius: 8px; color: black; text-align: center;">'
+                    html = ('<div style="background-color: #008000; padding: 15px; border-radius: 8px; color: white; text-align: center;">'
                             '<h1>SAFE CONDITION</h1>'
                             '</div>')
                 else:
@@ -200,22 +203,35 @@ def display_dashboard():
                 except Exception:
                     live_placeholder.error("Could not load live camera image.")
 
-            # Right Column Update: Most Recent Alert Image
-            with log_col:
-                path, timestamp, threat_type = get_most_recent_alert_image()
+            # Center Column: Most Recent Human Alert Image
+            with human_log_col:
+                path, timestamp, threat_type = get_most_recent_alert_image(threat_type="Human")
                 
                 if path and os.path.exists(path):
                     try:
                         alert_img = Image.open(path) 
-                        log_placeholder.image(alert_img, use_container_width=True, caption=f"Captured: {timestamp} | Type: {threat_type}")
+                        human_log_placeholder.image(alert_img, use_container_width=True, caption=f"Human Capture: {timestamp}")
                     except Exception:
-                        log_placeholder.warning("Image found but failed to load.")
+                        human_log_placeholder.warning("Image file missing or failed to load.")
                 else:
-                    log_placeholder.info("No threats have been logged yet.")
+                    human_log_placeholder.info("No Human threats logged yet.")
+
+            # Right Column: Most Recent Animal Alert Image
+            with animal_log_col:
+                path, timestamp, threat_type = get_most_recent_alert_image(threat_type="Animal")
+                
+                if path and os.path.exists(path):
+                    try:
+                        alert_img = Image.open(path) 
+                        animal_log_placeholder.image(alert_img, use_container_width=True, caption=f"Animal Capture: {timestamp}")
+                    except Exception:
+                        animal_log_placeholder.warning("Image file missing or failed to load.")
+                else:
+                    animal_log_placeholder.info("No Animal threats logged yet.")
+
 
         # Control the refresh rate (0.5 second pause)
         time.sleep(0.5) 
 
 if __name__ == "__main__":
-    # Ensure helper functions are correctly defined for execution (NO PLACEHOLDERS HERE)
     display_dashboard()

@@ -8,24 +8,29 @@ import sqlite3
 
 # --- CONFIGURATION ---
 PERSON_CLASS_ID = 0          # Class ID for 'person' in COCO dataset
-ANIMAL_CLASS_ID = 15         # Class ID for 'cat' (or similar common animal)
+ANIMAL_CLASS_ID = 15         # Class ID for 'cat' (or similar common animal in COCO dataset)
 CONFIDENCE_THRESHOLD = 0.5   
 ALERT_COOLDOWN_SECONDS = 5   
 
 # --- Shared Files & DB ---
 ALERT_STATUS_FILE = 'alert_status.txt'
 FRAME_OUTPUT_FILE_LIVE = 'current_frame.jpg'
-DB_NAME = 'surveillance_log.db'              
-ALERT_IMAGE_DIR = 'alert_images'             
+DB_NAME = 'surveillance_log.db' 
+# Primary folders for storing threat images
+ALERT_IMAGE_DIR = 'alert_images'             # <-- FOR HUMAN THREATS
+ANIMAL_IMAGE_DIR = 'animal_images'           # <-- NEW: FOR ANIMAL THREATS
 # --- END CONFIGURATION ---
 
 last_alert_time = 0
 ANIMAL_THREAT_TYPE = "Animal"
 HUMAN_THREAT_TYPE = "Human"
 
-# --- Database and Helper Functions (Kept the same) ---
+# --- Database and Helper Functions ---
 def init_db():
+    # Ensure both alert directories exist
     os.makedirs(ALERT_IMAGE_DIR, exist_ok=True)
+    os.makedirs(ANIMAL_IMAGE_DIR, exist_ok=True)
+    
     conn = sqlite3.connect(DB_NAME)
     cursor = conn.cursor()
     cursor.execute("""
@@ -40,9 +45,20 @@ def init_db():
     conn.close()
 
 def log_threat_to_db(frame, threat_type):
+    """Saves the frame to the correct folder and logs the image path to the database."""
     timestamp = time.strftime("%Y-%m-%d_%H-%M-%S")
     image_filename = f"{threat_type}_{timestamp}.png"
-    image_path = os.path.join(ALERT_IMAGE_DIR, image_filename)
+    
+    # ⬇️ FIX: Determine the correct directory based on threat type ⬇️
+    if threat_type == HUMAN_THREAT_TYPE:
+        target_dir = ALERT_IMAGE_DIR
+    elif threat_type == ANIMAL_THREAT_TYPE:
+        target_dir = ANIMAL_IMAGE_DIR
+    else:
+        # Fallback for safety
+        target_dir = ALERT_IMAGE_DIR
+    
+    image_path = os.path.join(target_dir, image_filename)
     cv2.imwrite(image_path, frame)
     
     conn = sqlite3.connect(DB_NAME)
@@ -54,6 +70,7 @@ def log_threat_to_db(frame, threat_type):
     print(f"Logged {threat_type} threat at {timestamp}")
 
 def update_live_feed(frame, status):
+    """Updates the shared status file and the single live frame image."""
     try:
         with open(ALERT_STATUS_FILE, 'w') as f:
             f.write(status)
@@ -62,6 +79,7 @@ def update_live_feed(frame, status):
         print(f"Error updating live files: {e}")
 
 def trigger_local_alert():
+    """Triggers the local audio alert based on cooldown."""
     global last_alert_time
     current_time = time.time()
     if current_time - last_alert_time < ALERT_COOLDOWN_SECONDS:
@@ -97,6 +115,8 @@ if __name__ == "__main__":
         detected_threat_type = None
         
         # Look for PERSON (0) and ANIMAL (15)
+        # Note: YOLO's class 15 is typically 'cat', 16 is 'dog', 17 is 'horse' 
+        # Using 15 is fine for a general 'animal' simulation.
         results = model(frame, verbose=False, classes=[PERSON_CLASS_ID, ANIMAL_CLASS_ID]) 
         
         for result in results:
@@ -116,12 +136,12 @@ if __name__ == "__main__":
                     label = f"{detected_threat_type.upper()}: {box.conf[0]*100:.1f}%"
                     cv2.putText(frame, label, (x1, y1 - 10), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 255), 2)
                     
-                    # Log the highest confidence threat found in the frame
+                    # Log the threat
                     if detected_threat_type:
                         trigger_local_alert() 
                         log_threat_to_db(frame, detected_threat_type)
                         current_detection_status = "ALERT" 
-                        break # Process only the highest threat per frame for speed
+                        break # Stop checking boxes once a high-confidence threat is logged
 
         update_live_feed(frame, current_detection_status)
         cv2.imshow('Detector: Press Q to Quit', frame)
